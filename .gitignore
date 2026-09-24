@@ -1,0 +1,5 @@
+.kilo/
+.vscode/
+bin/
+vendor/
+.env
