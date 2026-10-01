@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -19,6 +20,11 @@ type Model struct {
 	// service provides access to Google Secret Manager. It is an interface so
 	// tests can substitute a fake implementation.
 	service secretmanager.Service
+
+	// allowInvalidJSON bypasses the save-time JSON validity check (the
+	// --allow-invalid-json flag). When false, Ctrl+S refuses to reach the
+	// save-confirmation prompt unless the edited payload is valid JSON.
+	allowInvalidJSON bool
 
 	// projectInput is the bubbles textinput for the GCP project ID. It gives
 	// us rune-aware editing (no byte-wise backspace corruption), cursor
@@ -122,8 +128,9 @@ func (s secretItem) Description() string { return "" }
 // NewModel creates the initial model. service must not be nil. A non-empty
 // project pre-fills the project ID and skips the project prompt: the model
 // starts in the loading state and Init kicks off the secret listing
-// immediately.
-func NewModel(service secretmanager.Service, project string) Model {
+// immediately. allowInvalidJSON lets saves proceed with payloads that are
+// not valid JSON (see the --allow-invalid-json flag).
+func NewModel(service secretmanager.Service, project string, allowInvalidJSON bool) Model {
 	projectInput := textinput.New()
 	projectInput.Prompt = ""
 	projectInput.Placeholder = "my-gcp-project"
@@ -149,12 +156,13 @@ func NewModel(service secretmanager.Service, project string) Model {
 	secretList.DisableQuitKeybindings()
 
 	m := Model{
-		service:      service,
-		state:        StateProjectInput,
-		views:        NewViews(),
-		editor:       textarea.New(),
-		projectInput: projectInput,
-		list:         secretList,
+		service:          service,
+		allowInvalidJSON: allowInvalidJSON,
+		state:            StateProjectInput,
+		views:            NewViews(),
+		editor:           textarea.New(),
+		projectInput:     projectInput,
+		list:             secretList,
 	}
 	if projectInput.Value() != "" {
 		// A project was provided upfront: skip the prompt and go straight
@@ -280,7 +288,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.status = fmt.Sprintf("Saved %s as a new version; all other versions were disabled.", m.selectedSecret)
-		cmd := m.resetEditing()
+		// A successful save returns to the secret list (not the project
+		// input) so the user can immediately pick another secret; saving a
+		// new version does not change the list's contents.
+		cmd := m.resetEditing(StateSecretSelection)
 		return m, cmd
 	case error:
 		m.err = msg
@@ -407,12 +418,13 @@ func (m Model) saveSecretCmd() tea.Cmd {
 	}
 }
 
-// resetEditing returns to the project input state and clears the working
-// secret, keeping the project ID so the user can immediately pick another
-// secret. It returns the project input's focus command so the cursor resumes
-// blinking.
-func (m *Model) resetEditing() tea.Cmd {
-	m.state = StateProjectInput
+// resetEditing navigates to target and clears the working secret, keeping
+// the project ID (and the loaded secret list) so the user can continue right
+// away: after Esc it returns to the project input, after a successful save to
+// the secret selection. When target is the project input it returns the
+// input's focus command so the cursor resumes blinking; otherwise nil.
+func (m *Model) resetEditing(target AppState) tea.Cmd {
+	m.state = target
 	m.selectedSecret = ""
 	m.editor.SetValue("")
 	m.loadedContent = ""
@@ -423,7 +435,10 @@ func (m *Model) resetEditing() tea.Cmd {
 	m.loading = false
 	// Invalidate any in-flight command so its result is dropped as stale.
 	m.req++
-	return m.projectInput.Focus()
+	if target == StateProjectInput {
+		return m.projectInput.Focus()
+	}
+	return nil
 }
 
 // updateProjectInput handles key input while entering the project ID. Enter
@@ -484,9 +499,10 @@ func (m Model) updateSecretSelection(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateContentEdit handles key input while editing the secret payload.
-// Ctrl+S saves and Esc cancels; every other key is delegated to the textarea
-// component, which provides a real editor with a movable cursor, in-line
-// editing, word/line navigation and scrolling.
+// Ctrl+S saves (refusing payloads that are not valid JSON unless
+// --allow-invalid-json is set) and Esc cancels; every other key is delegated
+// to the textarea component, which provides a real editor with a movable
+// cursor, in-line editing, word/line navigation and scrolling.
 func (m Model) updateContentEdit(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Mod.Contains(tea.ModCtrl) && key.Code == 's':
@@ -500,14 +516,23 @@ func (m Model) updateContentEdit(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "Binary secrets are read-only and cannot be saved."
 			return m, nil
 		}
-		// Note: there is no save-time content check here. The editor's
+		// Note: there is no save-time corruption check here. The editor's
 		// sanitizer runs on every input path, so the editor can never hold
 		// content that the load gate would have rejected. The corruption risk
-		// is fully handled at load time by payloadEditBlocker.
+		// is fully handled at load time by payloadEditBlocker. (The JSON
+		// check below is a user-policy gate, not corruption handling.)
 		if m.editor.Value() == m.loadedContent {
 			// Nothing changed since the secret was loaded: skip the save so we
 			// don't create a redundant version and disable the others.
 			m.status = "No changes to save."
+			return m, nil
+		}
+		if !m.allowInvalidJSON && !json.Valid([]byte(m.editor.Value())) {
+			// The payload must be valid JSON before a save can proceed,
+			// unless the user opted out with --allow-invalid-json. Refuse
+			// here, before the confirmation prompt, so an invalid payload
+			// can never be confirmed.
+			m.status = "Secret value is not valid JSON (use --allow-invalid-json to save anyway)."
 			return m, nil
 		}
 		// Saving is destructive (it disables every other version), so ask for
@@ -517,7 +542,7 @@ func (m Model) updateContentEdit(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.state = StateConfirmSave
 		return m, nil
 	case key.Code == tea.KeyEscape:
-		cmd := m.resetEditing()
+		cmd := m.resetEditing(StateProjectInput)
 		return m, cmd
 	}
 

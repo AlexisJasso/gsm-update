@@ -13,6 +13,7 @@ import (
 func main() {
 	project := flag.String("project", "", "GCP project ID to open directly (skips the project prompt)")
 	flag.StringVar(project, "p", "", "shorthand for -project")
+	allowInvalidJSON := flag.Bool("allow-invalid-json", false, "allow saving secret payloads that are not valid JSON")
 	flag.Parse()
 
 	client, err := secretmanager.NewClient(context.Background())
@@ -25,7 +26,7 @@ func main() {
 		}
 	}()
 
-	p := tea.NewProgram(ui.NewModel(client, *project))
+	p := tea.NewProgram(ui.NewModel(client, *project, *allowInvalidJSON))
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}

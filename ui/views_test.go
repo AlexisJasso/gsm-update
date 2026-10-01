@@ -54,7 +54,7 @@ func TestSecretSelectionView(t *testing.T) {
 		{
 			name:         "list content and footer are rendered",
 			listContent:  "secret-one\nsecret-two",
-			wantContains: []string{"Select Secret", "secret-one", "secret-two", "/ to filter, ↑/↓ to navigate, Enter to select, Esc to go back"},
+			wantContains: []string{"Select Secret", "secret-one", "secret-two", "/ to filter, ↑/↓ to navigate, Enter to select, Esc to go to project selection"},
 		},
 		{
 			name:         "empty list content still shows footer",

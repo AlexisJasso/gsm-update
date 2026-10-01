@@ -62,7 +62,7 @@ func (v *Views) SecretSelectionView(listContent string) string {
 	s.WriteString(fmt.Sprintf("%s\n\n", v.title.Render("Select Secret")))
 	s.WriteString(listContent)
 	s.WriteString("\n")
-	s.WriteString("/ to filter, ↑/↓ to navigate, Enter to select, Esc to go back, Ctrl+C to quit")
+	s.WriteString("/ to filter, ↑/↓ to navigate, Enter to select, Esc to go to project selection, Ctrl+C to quit")
 	return s.String()
 }
 

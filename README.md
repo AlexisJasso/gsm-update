@@ -56,6 +56,12 @@ Pass a project ID to skip the project prompt and open its secret list directly:
 ./gsm-update --project my-gcp-project   # -p works too
 ```
 
+By default, a save is refused unless the edited payload is valid JSON. To allow saving any payload:
+
+```bash
+./gsm-update --allow-invalid-json
+```
+
 ### Workflow
 
 The application guides you through a three-step workflow:
