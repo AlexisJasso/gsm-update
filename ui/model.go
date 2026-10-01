@@ -143,8 +143,9 @@ func NewModel(service secretmanager.Service, project string) Model {
 	secretList.SetShowTitle(false)
 	secretList.SetShowHelp(false)
 	secretList.SetStatusBarItemName("secret", "secrets")
-	// The list's default quit bindings ("v", Ctrl+C) must not exit the app;
-	// quitting stays with bubbletea's Ctrl+C signal handling.
+	// The list's default quit bindings must not exit the app on their own;
+	// quitting (Ctrl+C) is handled globally in Update so it works from
+	// every state.
 	secretList.DisableQuitKeybindings()
 
 	m := Model{
@@ -179,6 +180,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// Ctrl+C quits from any state, as documented in the README and the
+		// view footers. In raw terminal mode Ctrl+C arrives as a keypress,
+		// not a SIGINT, so the model must translate it into tea.Quit
+		// explicitly; no child component sees it first.
+		if msg.Mod.Contains(tea.ModCtrl) && msg.Code == 'c' {
+			return m, tea.Quit
+		}
 		switch m.state {
 		case StateProjectInput:
 			return m.updateProjectInput(msg)

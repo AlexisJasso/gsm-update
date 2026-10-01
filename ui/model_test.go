@@ -139,6 +139,7 @@ func pgDownKey() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: tea.KeyPgDown
 func homeKey() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyHome} }
 func endKey() tea.KeyPressMsg       { return tea.KeyPressMsg{Code: tea.KeyEnd} }
 func ctrlSKey() tea.KeyPressMsg     { return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl} }
+func ctrlCKey() tea.KeyPressMsg     { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} }
 
 // toSelection drives the model from project input to the secret list.
 func toSelection(t *testing.T, m Model, project string) Model {
@@ -835,6 +836,36 @@ func TestEscapeFromContentEdit(t *testing.T) {
 	}
 	if m.selectedSecret != "" {
 		t.Errorf("selectedSecret = %q, want cleared", m.selectedSecret)
+	}
+}
+
+func TestCtrlCQuitsFromEveryState(t *testing.T) {
+	// The README and the view footers document Ctrl+C as quitting from
+	// anywhere. In raw terminal mode it arrives as a keypress, not a
+	// signal, so the model must translate it into tea.Quit itself.
+	svc := &fakeService{secrets: []string{"s"}, content: "old"}
+
+	states := map[string]Model{
+		"project input":    NewModel(svc, ""),
+		"secret selection": toSelection(t, NewModel(svc, ""), "proj"),
+		"content edit":     toEditor(t, NewModel(svc, ""), "proj"),
+	}
+
+	// Drive a fourth model to the confirm-save prompt.
+	m := toEditor(t, NewModel(svc, ""), "proj")
+	m = typeString(t, m, "X")
+	m, _ = update(t, m, ctrlSKey())
+	states["confirm save"] = m
+
+	for name, m := range states {
+		_, cmd := update(t, m, ctrlCKey())
+		if cmd == nil {
+			t.Errorf("%s: Ctrl+C should return a quit cmd", name)
+			continue
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("%s: Ctrl+C cmd yields %T, want tea.QuitMsg", name, cmd())
+		}
 	}
 }
 
