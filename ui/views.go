@@ -17,6 +17,11 @@ type Views struct {
 	input lipgloss.Style
 	// editor frames the secret content editor.
 	editor lipgloss.Style
+	// status dims transient feedback lines (loading indicator, save
+	// results, save refusals) so they never compete with errors.
+	status lipgloss.Style
+	// err highlights error lines.
+	err lipgloss.Style
 }
 
 func NewViews() *Views {
@@ -34,6 +39,8 @@ func NewViews() *Views {
 			Align(lipgloss.Center),
 		input:  frame,
 		editor: frame,
+		status: lipgloss.NewStyle().Faint(true),
+		err:    lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
 	}
 }
 
@@ -79,4 +86,15 @@ func (v *Views) ContentView(secretName, editor string) string {
 		v.title.Render(fmt.Sprintf("Editing: %s", secretName)),
 		v.editor.Render(editor),
 	)
+}
+
+// StatusView renders a transient status line (loading indicator, save
+// results, save refusals), dimmed so it stays in the background.
+func (v *Views) StatusView(status string) string {
+	return v.status.Render(status)
+}
+
+// ErrorView renders an error line in red, prefixed with "Error:".
+func (v *Views) ErrorView(err error) string {
+	return v.err.Render(fmt.Sprintf("Error: %v", err))
 }

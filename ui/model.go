@@ -326,16 +326,18 @@ func (m Model) View() tea.View {
 	}
 
 	if m.loading {
-		s.WriteString("\nLoading...")
+		s.WriteString("\n")
+		s.WriteString(m.views.StatusView("Loading..."))
 	}
 
 	if m.status != "" {
 		s.WriteString("\n\n")
-		s.WriteString(m.status)
+		s.WriteString(m.views.StatusView(m.status))
 	}
 
 	if m.err != nil {
-		s.WriteString(fmt.Sprintf("\n\nError: %v", m.err))
+		s.WriteString("\n\n")
+		s.WriteString(m.views.ErrorView(m.err))
 	}
 
 	view := tea.NewView(s.String())

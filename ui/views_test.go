@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -143,5 +144,23 @@ func TestContentViewFooter(t *testing.T) {
 	got := v.ContentView("my-secret", "some content")
 	if !strings.Contains(got, "Arrows to move the cursor, Home/End to jump, Ctrl+S to save, Esc to cancel") {
 		t.Errorf("ContentView() missing footer hint: %q", got)
+	}
+}
+
+func TestStatusView(t *testing.T) {
+	v := NewViews()
+
+	got := v.StatusView("Saved s as a new version.")
+	if !strings.Contains(got, "Saved s as a new version.") {
+		t.Errorf("StatusView() = %q, want the status message", got)
+	}
+}
+
+func TestErrorView(t *testing.T) {
+	v := NewViews()
+
+	got := v.ErrorView(errors.New("boom"))
+	if !strings.Contains(got, "Error: boom") {
+		t.Errorf("ErrorView() = %q, want %q", got, "Error: boom")
 	}
 }
