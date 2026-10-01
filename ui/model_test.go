@@ -563,6 +563,69 @@ func TestContentEditTyping(t *testing.T) {
 	}
 }
 
+// renderedRows counts the terminal rows a rendered view occupies.
+func renderedRows(content string) int {
+	return strings.Count(content, "\n") + 1
+}
+
+func TestContentEditStatusFitsWindow(t *testing.T) {
+	// Regression: the editor height was bounded by the window minus only the
+	// title/footer chrome, so the status line appended below the view
+	// overflowed the last terminal row and was never visible.
+	svc := &fakeService{secrets: []string{"s"}, content: "1"}
+	m := toEditor(t, NewModel(svc, "", false), "proj")
+	const height = 24
+	m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+
+	// Ctrl+S with no changes stays in the editor with a status message.
+	m, _ = update(t, m, ctrlSKey())
+	if m.status == "" {
+		t.Fatal("expected a status message for the unchanged save")
+	}
+
+	view := m.View()
+	if !strings.Contains(view.Content, "No changes to save.") {
+		t.Errorf("view should contain the status message, got:\n%s", view.Content)
+	}
+	if rows := renderedRows(view.Content); rows > height {
+		t.Errorf("view is %d rows, want <= %d (status line must fit the window)", rows, height)
+	}
+}
+
+func TestContentEditStatusAndErrorFitWindow(t *testing.T) {
+	// Both feedback lines can be set at once: a failed save sets err, and a
+	// later unchanged Ctrl+S adds a status. The view must still fit.
+	svc := &fakeService{secrets: []string{"s"}, content: "1", saveErr: errors.New("denied")}
+	m := toEditor(t, NewModel(svc, "", false), "proj")
+	const height = 24
+	m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
+
+	m = typeString(t, m, "2")       // "12"
+	m, _ = update(t, m, ctrlSKey()) // to the confirm prompt
+	var cmd tea.Cmd
+	m, cmd = update(t, m, tea.KeyPressMsg{Text: "y", Code: 'y'})
+	m = runCmd(t, m, cmd) // save fails: err set, back in the editor
+	if m.err == nil {
+		t.Fatal("expected the save error to be surfaced")
+	}
+
+	m, _ = update(t, m, backspaceKey()) // back to "1" == loaded content
+	m, _ = update(t, m, ctrlSKey())     // "No changes to save." status
+	if m.status == "" {
+		t.Fatal("expected a status message for the unchanged save")
+	}
+
+	view := m.View()
+	for _, want := range []string{"No changes to save.", "denied"} {
+		if !strings.Contains(view.Content, want) {
+			t.Errorf("view should contain %q, got:\n%s", want, view.Content)
+		}
+	}
+	if rows := renderedRows(view.Content); rows > height {
+		t.Errorf("view is %d rows, want <= %d (status and error lines must fit the window)", rows, height)
+	}
+}
+
 func TestSaveSuccess(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "1"}
 	m := toEditor(t, NewModel(svc, "", false), "proj")

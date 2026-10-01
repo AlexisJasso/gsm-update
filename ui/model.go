@@ -115,6 +115,14 @@ const (
 	// list height is bounded by the window height minus this so the whole
 	// view fits.
 	listChromeH = 8
+
+	// editorChromeH is the number of terminal rows the content-edit view
+	// uses outside the editor component: title (1), spacing (2), footer (1),
+	// the frame's border and padding (4), and room for the status and error
+	// lines appended below the view (3 each). The editor height is bounded
+	// by the window height minus this so those lines fit on screen instead
+	// of overflowing past the last row.
+	editorChromeH = 14
 )
 
 // secretItem adapts a secret name to the list.DefaultItem interface so the
@@ -207,12 +215,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		// Fit the editor to the terminal: the border and padding take four
-		// columns, and the title/footer take roughly eight rows.
+		// columns, and the rows outside the editor (editorChromeH) cover the
+		// title, footer, frame, and the status/error lines appended below.
 		if msg.Width > 4 {
 			m.editor.SetWidth(msg.Width - 4)
 		}
-		if msg.Height > 8 {
-			m.editor.SetHeight(msg.Height - 8)
+		if msg.Height > editorChromeH {
+			m.editor.SetHeight(msg.Height - editorChromeH)
 		}
 		m.list.SetSize(msg.Width, max(1, msg.Height-listChromeH))
 		return m, nil
