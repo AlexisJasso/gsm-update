@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/list"
@@ -120,13 +119,17 @@ func (s secretItem) FilterValue() string { return string(s) }
 func (s secretItem) Title() string       { return string(s) }
 func (s secretItem) Description() string { return "" }
 
-// NewModel creates the initial model. service must not be nil.
-func NewModel(service secretmanager.Service) Model {
+// NewModel creates the initial model. service must not be nil. A non-empty
+// project pre-fills the project ID and skips the project prompt: the model
+// starts in the loading state and Init kicks off the secret listing
+// immediately.
+func NewModel(service secretmanager.Service, project string) Model {
 	projectInput := textinput.New()
 	projectInput.Prompt = ""
 	projectInput.Placeholder = "my-gcp-project"
 	projectInput.CharLimit = 30 // GCP project IDs are at most 30 characters.
 	projectInput.SetWidth(40)
+	projectInput.SetValue(strings.TrimSpace(project))
 	projectInput.Focus()
 
 	// Single-line items with no description and no gap between rows.
@@ -144,7 +147,7 @@ func NewModel(service secretmanager.Service) Model {
 	// quitting stays with bubbletea's Ctrl+C signal handling.
 	secretList.DisableQuitKeybindings()
 
-	return Model{
+	m := Model{
 		service:      service,
 		state:        StateProjectInput,
 		views:        NewViews(),
@@ -152,10 +155,23 @@ func NewModel(service secretmanager.Service) Model {
 		projectInput: projectInput,
 		list:         secretList,
 	}
+	if projectInput.Value() != "" {
+		// A project was provided upfront: skip the prompt and go straight
+		// to the (loading) secret list.
+		m.state = StateSecretSelection
+		m.loading = true
+		m.req++
+	}
+	return m
 }
 
-// Init initializes the application
+// Init initializes the application. When a project was provided upfront, the
+// model starts in the loading state and Init fires the initial secret
+// listing; otherwise there is nothing to do until the user types.
 func (m Model) Init() tea.Cmd {
+	if m.loading {
+		return m.listSecretsCmd()
+	}
 	return nil
 }
 
@@ -350,40 +366,21 @@ func (m Model) loadSecretCmd() tea.Cmd {
 	}
 }
 
-// sanitize mirrors the bubbles textarea's rune sanitizer: it strips control
-// characters (except tab and newline), expands tabs to four spaces, and
-// normalizes carriage returns to newlines. Comparing sanitize(s) with s tells
-// us whether the editor would alter s on load or on save.
-func sanitize(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\t':
-			b.WriteString("    ")
-		case r == '\r':
-			b.WriteByte('\n')
-		case r == '\n':
-			b.WriteByte('\n')
-		case unicode.IsControl(r):
-			// Other control characters are dropped by the editor's sanitizer.
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // payloadEditBlocker reports whether a secret payload cannot be safely edited
 // as text, and a human-readable reason. A payload is blocked when it is not
-// valid UTF-8 (a binary payload) or when the editor's sanitizer would alter
-// it on the way in or out (tabs, carriage returns, or control characters),
-// because a round-trip through the editor would then corrupt it.
+// valid UTF-8 (a binary payload) or when the editor would alter it on the way
+// in or out (tabs, carriage returns, or control characters), because a
+// round-trip through the editor would then corrupt it. The second check is
+// empirical — it round-trips the payload through a throwaway textarea and
+// compares — so it stays correct if the textarea's sanitizer ever changes,
+// instead of mirroring the sanitizer's rules by hand.
 func payloadEditBlocker(payload string) (reason string, blocked bool) {
 	if !utf8.ValidString(payload) {
 		return "This secret is not valid UTF-8 (it looks like binary data).", true
 	}
-	if sanitize(payload) != payload {
+	ta := textarea.New()
+	ta.SetValue(payload)
+	if ta.Value() != payload {
 		return "This secret contains tabs, carriage returns, or control characters that the editor cannot preserve.", true
 	}
 	return "", false

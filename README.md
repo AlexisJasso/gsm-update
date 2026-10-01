@@ -50,11 +50,17 @@ Run the application:
 ./gsm-update
 ```
 
+Pass a project ID to skip the project prompt and open its secret list directly:
+
+```bash
+./gsm-update --project my-gcp-project   # -p works too
+```
+
 ### Workflow
 
 The application guides you through a three-step workflow:
 
-1. **Enter Project ID** — Type your GCP project ID and press `Enter`
+1. **Enter Project ID** — Type your GCP project ID and press `Enter` (skipped when you pass `--project`)
 2. **Select Secret** — Use `↑` / `↓` to navigate the secret list, `/` to fuzzy-filter it, then press `Enter` to select
 3. **Edit Content** — Edit the secret payload inline, then save or cancel. Saving is destructive (it disables every other version of the secret), so the app asks for confirmation (`y`/`N`) before it takes effect.
 

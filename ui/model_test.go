@@ -16,17 +16,19 @@ import (
 
 // fakeService implements secretmanager.Service for tests.
 type fakeService struct {
-	secrets      []string
-	listErr      error
-	content      string
-	version      string
-	getErr       error
-	savedPayload string
-	saveCalls    int
-	saveErr      error
+	secrets       []string
+	listErr       error
+	listedProject string
+	content       string
+	version       string
+	getErr        error
+	savedPayload  string
+	saveCalls     int
+	saveErr       error
 }
 
 func (f *fakeService) ListSecrets(_ context.Context, projectID string) ([]string, error) {
+	f.listedProject = projectID
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -165,7 +167,7 @@ func toEditor(t *testing.T, m Model, project string) Model {
 }
 
 func TestNewModelDefaults(t *testing.T) {
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	if m.state != StateProjectInput {
 		t.Errorf("initial state = %v, want StateProjectInput", m.state)
 	}
@@ -177,8 +179,62 @@ func TestNewModelDefaults(t *testing.T) {
 	}
 }
 
+func TestNewModelWithProjectSkipsPrompt(t *testing.T) {
+	svc := &fakeService{secrets: []string{"a", "b"}}
+	m := NewModel(svc, "proj")
+
+	if m.state != StateSecretSelection {
+		t.Errorf("state = %v, want StateSecretSelection (prompt skipped)", m.state)
+	}
+	if !m.loading {
+		t.Error("loading should be true; the initial list should be in flight")
+	}
+	if got := m.projectInput.Value(); got != "proj" {
+		t.Errorf("project input = %q, want %q", got, "proj")
+	}
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("Init should return the initial list cmd when a project is given")
+	}
+	m = runCmd(t, m, cmd)
+
+	if m.state != StateSecretSelection {
+		t.Errorf("state = %v, want StateSecretSelection", m.state)
+	}
+	if m.loading {
+		t.Error("loading should be false after the list result")
+	}
+	if got := m.list.Items(); len(got) != 2 {
+		t.Errorf("list items = %v, want 2 entries", got)
+	}
+	if svc.listedProject != "proj" {
+		t.Errorf("listed project = %q, want %q", svc.listedProject, "proj")
+	}
+}
+
+func TestNewModelWithPaddedProjectTrims(t *testing.T) {
+	m := NewModel(&fakeService{}, "  proj  ")
+	if got := m.projectInput.Value(); got != "proj" {
+		t.Errorf("project input = %q, want trimmed %q", got, "proj")
+	}
+	if m.state != StateSecretSelection {
+		t.Errorf("state = %v, want StateSecretSelection", m.state)
+	}
+}
+
+func TestNewModelWithWhitespaceProjectShowsPrompt(t *testing.T) {
+	m := NewModel(&fakeService{}, "   ")
+	if m.state != StateProjectInput {
+		t.Errorf("state = %v, want StateProjectInput (whitespace-only project is no project)", m.state)
+	}
+	if cmd := m.Init(); cmd != nil {
+		t.Error("Init should not start a list for a whitespace-only project")
+	}
+}
+
 func TestProjectInputTyping(t *testing.T) {
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	m = typeString(t, m, "abc")
 	m, _ = update(t, m, backspaceKey())
 	m = typeString(t, m, "d")
@@ -190,7 +246,7 @@ func TestProjectInputTyping(t *testing.T) {
 func TestProjectInputBackspaceMultiByte(t *testing.T) {
 	// Regression: byte-wise backspace used to corrupt multi-byte UTF-8
 	// input, leaving an invalid tail. The textinput deletes whole runes.
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	m = typeString(t, m, "hé")
 	m, _ = update(t, m, backspaceKey())
 	if got := m.projectInput.Value(); got != "h" {
@@ -200,7 +256,7 @@ func TestProjectInputBackspaceMultiByte(t *testing.T) {
 
 func TestProjectInputEnterTriggersList(t *testing.T) {
 	svc := &fakeService{secrets: []string{"a", "b"}}
-	m := NewModel(svc)
+	m := NewModel(svc, "")
 	m = typeString(t, m, "proj")
 
 	var cmd tea.Cmd
@@ -225,7 +281,7 @@ func TestProjectInputEnterTriggersList(t *testing.T) {
 }
 
 func TestProjectInputEmptyEnterIgnored(t *testing.T) {
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	m, cmd := update(t, m, enterKey())
 	if cmd != nil {
 		t.Error("Enter with empty project ID should not return a cmd")
@@ -236,7 +292,7 @@ func TestProjectInputEmptyEnterIgnored(t *testing.T) {
 }
 
 func TestProjectInputWhitespaceOnlyEnterIgnored(t *testing.T) {
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	m = typeString(t, m, "   ")
 
 	m, cmd := update(t, m, enterKey())
@@ -250,7 +306,7 @@ func TestProjectInputWhitespaceOnlyEnterIgnored(t *testing.T) {
 
 func TestProjectInputEnterTrimsWhitespace(t *testing.T) {
 	svc := &fakeService{secrets: []string{"a"}}
-	m := NewModel(svc)
+	m := NewModel(svc, "")
 	m = typeString(t, m, "  proj  ")
 
 	m, cmd := update(t, m, enterKey())
@@ -269,7 +325,7 @@ func TestProjectInputEnterTrimsWhitespace(t *testing.T) {
 
 func TestListErrorReturnsToProjectInput(t *testing.T) {
 	svc := &fakeService{listErr: errors.New("no such project")}
-	m := NewModel(svc)
+	m := NewModel(svc, "")
 	m = typeString(t, m, "bad-project")
 
 	var cmd tea.Cmd
@@ -289,7 +345,7 @@ func TestListErrorReturnsToProjectInput(t *testing.T) {
 
 func TestSecretSelectionFilter(t *testing.T) {
 	svc := &fakeService{secrets: []string{"db-password", "api-key", "db-backup"}}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	// "/" opens the list's filter editor.
 	m, cmd := update(t, m, tea.KeyPressMsg{Text: "/", Code: '/'})
@@ -316,7 +372,7 @@ func TestSecretSelectionFilter(t *testing.T) {
 
 func TestSecretSelectionEscPeelsFilterBeforeLeaving(t *testing.T) {
 	svc := &fakeService{secrets: []string{"db-password", "api-key"}}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, cmd := update(t, m, tea.KeyPressMsg{Text: "/", Code: '/'})
 	m = drainCmd(t, m, cmd)
@@ -346,7 +402,7 @@ func TestSecretSelectionEscPeelsFilterBeforeLeaving(t *testing.T) {
 
 func TestSecretSelectionNavigation(t *testing.T) {
 	svc := &fakeService{secrets: []string{"a", "b", "c"}}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, _ = update(t, m, downKey())
 	if m.list.Index() != 1 {
@@ -370,7 +426,7 @@ func TestSecretSelectionPageNavigation(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		svc.secrets = append(svc.secrets, fmt.Sprintf("s%02d", i))
 	}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 	m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
 
 	perPage := m.list.Paginator.PerPage
@@ -401,7 +457,7 @@ func TestListViewRendersSelectedItem(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		svc.secrets = append(svc.secrets, fmt.Sprintf("s%02d", i))
 	}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 	m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
 	m.list.Select(25)
 
@@ -417,7 +473,7 @@ func TestListViewRendersSelectedItem(t *testing.T) {
 
 func TestSecretSelectionEnterLoads(t *testing.T) {
 	svc := &fakeService{secrets: []string{"target"}, content: "secret-value"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	var cmd tea.Cmd
 	m, cmd = update(t, m, enterKey())
@@ -442,7 +498,7 @@ func TestSecretSelectionEnterWhileFilteringAppliesFilter(t *testing.T) {
 	// selecting an item. A filter with no matches resets to unfiltered
 	// instead of loading anything.
 	svc := &fakeService{secrets: []string{"other"}}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, cmd := update(t, m, tea.KeyPressMsg{Text: "/", Code: '/'})
 	m = drainCmd(t, m, cmd)
@@ -466,7 +522,7 @@ func TestSecretSelectionEnterWhileFilteringAppliesFilter(t *testing.T) {
 
 func TestSecretSelectionEscKeepsProjectID(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, _ = update(t, m, escKey())
 	if m.state != StateProjectInput {
@@ -479,7 +535,7 @@ func TestSecretSelectionEscKeepsProjectID(t *testing.T) {
 
 func TestLoadErrorReturnsToSelection(t *testing.T) {
 	svc := &fakeService{secrets: []string{"target"}, getErr: errors.New("denied")}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	var cmd tea.Cmd
 	m, cmd = update(t, m, enterKey())
@@ -495,7 +551,7 @@ func TestLoadErrorReturnsToSelection(t *testing.T) {
 
 func TestContentEditTyping(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "start"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "!")
 	m, _ = update(t, m, enterKey()) // newline
@@ -508,7 +564,7 @@ func TestContentEditTyping(t *testing.T) {
 
 func TestSaveSuccess(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "-new")
 	contentBefore := m.editor.Value()
@@ -561,7 +617,7 @@ func TestSaveSuccess(t *testing.T) {
 
 func TestSaveFailureKeepsEditor(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old", saveErr: errors.New("quota")}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 	contentBefore := m.editor.Value()
@@ -587,7 +643,7 @@ func TestSaveFailureKeepsEditor(t *testing.T) {
 
 func TestSaveGuardWhileSaving(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "x"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "Y") // make an edit so the save is not skipped
 
@@ -610,7 +666,7 @@ func TestSaveGuardWhileSaving(t *testing.T) {
 
 func TestSaveSkippedWhenUnchanged(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "original"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	// No edits: the editor value still equals the loaded content.
 	var cmd tea.Cmd
@@ -637,7 +693,7 @@ func TestSaveSkippedWhenUnchanged(t *testing.T) {
 
 func TestSaveConfirmPrompt(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 	contentBefore := m.editor.Value()
@@ -662,7 +718,7 @@ func TestSaveConfirmPrompt(t *testing.T) {
 
 func TestSaveConfirmNoCancels(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 	contentBefore := m.editor.Value()
@@ -688,7 +744,7 @@ func TestSaveConfirmNoCancels(t *testing.T) {
 
 func TestSaveConfirmEscCancels(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 
@@ -707,7 +763,7 @@ func TestSaveConfirmEscCancels(t *testing.T) {
 
 func TestSaveConfirmIgnoresOtherKeys(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 
@@ -726,7 +782,7 @@ func TestSaveConfirmIgnoresOtherKeys(t *testing.T) {
 
 func TestSaveConfirmCapsYConfirms(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 
@@ -743,7 +799,7 @@ func TestSaveConfirmCapsYConfirms(t *testing.T) {
 
 func TestSaveFailureReturnsFromConfirm(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "old", saveErr: errors.New("denied")}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 
@@ -765,7 +821,7 @@ func TestSaveFailureReturnsFromConfirm(t *testing.T) {
 
 func TestEscapeFromContentEdit(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: "x"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m, _ = update(t, m, escKey())
 	if m.state != StateProjectInput {
@@ -786,7 +842,7 @@ func TestKeyReleaseIgnored(t *testing.T) {
 	// Regression: matching on the generic tea.KeyMsg would also catch
 	// KeyReleaseMsg and double-process every keystroke. Only KeyPressMsg
 	// should be handled.
-	m := NewModel(&fakeService{})
+	m := NewModel(&fakeService{}, "")
 	m, _ = update(t, m, tea.KeyReleaseMsg{Text: "a", Code: 'a'})
 	if got := m.projectInput.Value(); got != "" {
 		t.Errorf("key release should be ignored, project input = %q", got)
@@ -797,7 +853,7 @@ func TestStaleLoadResultDroppedAfterEsc(t *testing.T) {
 	// Regression: the user selected a secret, then hit Esc before the load
 	// finished. The late result must not reopen the editor.
 	svc := &fakeService{secrets: []string{"s"}, content: "payload"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, cmd := update(t, m, enterKey()) // starts the load
 	if cmd == nil {
@@ -831,7 +887,7 @@ func TestLoadResultForPreviousSecretDropped(t *testing.T) {
 	// The user loads secret "a", cancels, then selects and loads secret "b".
 	// The late result for "a" must not overwrite the editor while "b" loads.
 	svc := &fakeService{secrets: []string{"a", "b"}, content: "payload-a"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 
 	m, firstCmd := update(t, m, enterKey()) // load "a"
 	if firstCmd == nil {
@@ -868,7 +924,7 @@ func TestStaleListResultDroppedAfterEsc(t *testing.T) {
 	// the project input before the list arrived. The late result must not
 	// force the selection state back on them.
 	svc := &fakeService{secrets: []string{"a"}}
-	m := NewModel(svc)
+	m := NewModel(svc, "")
 	m = typeString(t, m, "proj")
 
 	m, cmd := update(t, m, enterKey()) // starts the list
@@ -894,7 +950,7 @@ func TestEscIgnoredWhileSaveInFlight(t *testing.T) {
 	// mid-save: the user stays on the prompt until the result arrives, which
 	// then routes them back to the editor (failure) or project input (success).
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 	m, _ = update(t, m, ctrlSKey())
@@ -927,7 +983,7 @@ func TestStaleSaveResultDropped(t *testing.T) {
 	// A save result whose request generation no longer matches the model's
 	// (e.g. the user navigated away while it was in flight) must be dropped.
 	svc := &fakeService{secrets: []string{"s"}, content: "old"}
-	m := toEditor(t, NewModel(svc), "proj")
+	m := toEditor(t, NewModel(svc, ""), "proj")
 
 	m = typeString(t, m, "X")
 	m, _ = update(t, m, ctrlSKey())
@@ -955,7 +1011,7 @@ func TestStaleSaveResultDropped(t *testing.T) {
 func driveToLoaded(t *testing.T, payload string) Model {
 	t.Helper()
 	svc := &fakeService{secrets: []string{"s"}, content: payload, version: "projects/p/secrets/s/versions/7"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 	var cmd tea.Cmd
 	m, cmd = update(t, m, enterKey())
 	m = runCmd(t, m, cmd)
@@ -1015,7 +1071,7 @@ func TestLoadCleanSecretEditable(t *testing.T) {
 
 func TestBinarySecretNotSaved(t *testing.T) {
 	svc := &fakeService{secrets: []string{"s"}, content: string([]byte{0xff, 0xfe}), version: "v1"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 	m, cmd := update(t, m, enterKey())
 	m = runCmd(t, m, cmd)
 	if !m.binary {
@@ -1079,26 +1135,11 @@ func TestPayloadEditBlocker(t *testing.T) {
 	}
 }
 
-func TestSanitize(t *testing.T) {
-	if got := sanitize("a\tb"); got != "a    b" {
-		t.Errorf("sanitize tab = %q, want %q", got, "a    b")
-	}
-	if got := sanitize("a\rb"); got != "a\nb" {
-		t.Errorf("sanitize CR = %q, want %q", got, "a\nb")
-	}
-	if got := sanitize("a\x00\x07b"); got != "ab" {
-		t.Errorf("sanitize control chars = %q, want %q", got, "ab")
-	}
-	if got := sanitize("clean\ntext\n"); got != "clean\ntext\n" {
-		t.Errorf("sanitize clean = %q, want unchanged", got)
-	}
-}
-
 func TestBinarySecretEscClearsState(t *testing.T) {
 	// Esc from a binary secret must clear the binary flag, payload, and info
 	// so the next load starts clean.
 	svc := &fakeService{secrets: []string{"s"}, content: string([]byte{0xff, 0xfe}), version: "v1"}
-	m := toSelection(t, NewModel(svc), "proj")
+	m := toSelection(t, NewModel(svc, ""), "proj")
 	m, cmd := update(t, m, enterKey())
 	m = runCmd(t, m, cmd)
 	if !m.binary {
