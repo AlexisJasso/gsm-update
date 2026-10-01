@@ -3,10 +3,14 @@ package secretmanager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNewClient(t *testing.T) {
@@ -292,6 +296,51 @@ func TestCreateSecretVersion(t *testing.T) {
 		// v1 failed; v2 must not have been attempted.
 		if !reflect.DeepEqual(api.disabled, []string{"v1"}) {
 			t.Errorf("disabled = %v, want [v1]", api.disabled)
+		}
+	})
+}
+
+func TestWithHint(t *testing.T) {
+	t.Run("known gRPC codes get actionable hints", func(t *testing.T) {
+		tests := []struct {
+			code codes.Code
+			want string
+		}{
+			{codes.Unauthenticated, "gcloud auth application-default login"},
+			{codes.PermissionDenied, "secretAccessor"},
+			{codes.NotFound, "project ID and secret name"},
+		}
+		for _, tt := range tests {
+			err := withHint(status.Error(tt.code, "boom"))
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("withHint(%v) = %q, want hint containing %q", tt.code, err, tt.want)
+			}
+			if !strings.Contains(err.Error(), "boom") {
+				t.Errorf("withHint(%v) = %q, want the original message preserved", tt.code, err)
+			}
+		}
+	})
+
+	t.Run("unrecognized errors pass through unchanged", func(t *testing.T) {
+		plain := errors.New("boom")
+		if got := withHint(plain); got != plain {
+			t.Errorf("withHint(%v) = %v, want the same error back", plain, got)
+		}
+		grpcErr := status.Error(codes.Unavailable, "boom")
+		if got := withHint(grpcErr); got != grpcErr {
+			t.Errorf("withHint(%v) = %v, want the same error back", grpcErr, got)
+		}
+	})
+
+	t.Run("hints preserve the error chain", func(t *testing.T) {
+		raw := status.Error(codes.NotFound, "boom")
+		// Compose the way the Client methods do: hint first, context second.
+		wrapped := fmt.Errorf("failed to list secrets: %w", withHint(raw))
+		if !errors.Is(wrapped, raw) {
+			t.Error("errors.Is must still find the original error through the hint")
+		}
+		if status.Code(wrapped) != codes.NotFound {
+			t.Errorf("status.Code(wrapped) = %v, want %v", status.Code(wrapped), codes.NotFound)
 		}
 	})
 }

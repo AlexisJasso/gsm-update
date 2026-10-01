@@ -235,6 +235,38 @@ func TestProjectInputEmptyEnterIgnored(t *testing.T) {
 	}
 }
 
+func TestProjectInputWhitespaceOnlyEnterIgnored(t *testing.T) {
+	m := NewModel(&fakeService{})
+	m = typeString(t, m, "   ")
+
+	m, cmd := update(t, m, enterKey())
+	if cmd != nil {
+		t.Error("Enter with a whitespace-only project ID should not return a cmd")
+	}
+	if m.state != StateProjectInput {
+		t.Errorf("state = %v, want StateProjectInput", m.state)
+	}
+}
+
+func TestProjectInputEnterTrimsWhitespace(t *testing.T) {
+	svc := &fakeService{secrets: []string{"a"}}
+	m := NewModel(svc)
+	m = typeString(t, m, "  proj  ")
+
+	m, cmd := update(t, m, enterKey())
+	if cmd == nil {
+		t.Fatal("Enter with a padded project ID should return a list cmd")
+	}
+	if got := m.projectInput.Value(); got != "proj" {
+		t.Errorf("project input = %q, want trimmed %q", got, "proj")
+	}
+
+	m = runCmd(t, m, cmd)
+	if m.state != StateSecretSelection {
+		t.Errorf("state = %v, want StateSecretSelection", m.state)
+	}
+}
+
 func TestListErrorReturnsToProjectInput(t *testing.T) {
 	svc := &fakeService{listErr: errors.New("no such project")}
 	m := NewModel(svc)

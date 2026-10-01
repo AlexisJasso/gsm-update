@@ -10,6 +10,8 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // operationTimeout bounds each Secret Manager operation.
@@ -89,7 +91,7 @@ func (c *Client) ListSecrets(ctx context.Context, projectID string) ([]string, e
 
 	names, err := c.api.listSecrets(ctx, "projects/"+projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list secrets: %w", err)
+		return nil, fmt.Errorf("failed to list secrets: %w", withHint(err))
 	}
 	return names, nil
 }
@@ -108,7 +110,7 @@ func (c *Client) GetSecretVersion(ctx context.Context, projectID, secretName str
 
 	versions, err := c.api.listSecretVersions(ctx, parent)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to list secret versions: %w", err)
+		return "", "", fmt.Errorf("failed to list secret versions: %w", withHint(err))
 	}
 
 	latest := ""
@@ -133,7 +135,7 @@ func (c *Client) GetSecretVersion(ctx context.Context, projectID, secretName str
 
 	data, err := c.api.accessSecretVersion(ctx, latest)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to access secret version: %w", err)
+		return "", "", fmt.Errorf("failed to access secret version: %w", withHint(err))
 	}
 	return string(data), latest, nil
 }
@@ -162,12 +164,12 @@ func (c *Client) CreateSecretVersion(ctx context.Context, projectID, secretName,
 
 	newVersion, err := c.api.addSecretVersion(ctx, name, []byte(payload))
 	if err != nil {
-		return fmt.Errorf("failed to create secret version: %w", err)
+		return fmt.Errorf("failed to create secret version: %w", withHint(err))
 	}
 
 	versions, err := c.api.listSecretVersions(ctx, name)
 	if err != nil {
-		return fmt.Errorf("failed to list secret versions: %w", err)
+		return fmt.Errorf("failed to list secret versions: %w", withHint(err))
 	}
 
 	for _, version := range versions {
@@ -175,7 +177,7 @@ func (c *Client) CreateSecretVersion(ctx context.Context, projectID, secretName,
 			continue
 		}
 		if err := c.api.disableSecretVersion(ctx, version.name); err != nil {
-			return fmt.Errorf("failed to disable secret version %s: %w", version.name, err)
+			return fmt.Errorf("failed to disable secret version %s: %w", version.name, withHint(err))
 		}
 	}
 
@@ -242,6 +244,26 @@ func (a *gcpAPI) listSecretVersions(ctx context.Context, parent string) ([]secre
 func (a *gcpAPI) disableSecretVersion(ctx context.Context, name string) error {
 	_, err := a.client.DisableSecretVersion(ctx, &secretmanagerpb.DisableSecretVersionRequest{Name: name})
 	return err
+}
+
+// withHint annotates well-known GCP error conditions with an actionable
+// hint, so the UI can show the user how to fix the problem instead of a raw
+// API error. Unrecognized errors are returned unchanged. The annotation
+// wraps the original error, so errors.Is/As and status.Code keep working.
+func withHint(err error) error {
+	var hint string
+	switch status.Code(err) {
+	case codes.Unauthenticated:
+		hint = "run `gcloud auth application-default login` to set up credentials"
+	case codes.PermissionDenied:
+		hint = "grant the secretmanager.secretAccessor IAM role and make sure the Secret Manager API is enabled on the project"
+	case codes.NotFound:
+		hint = "check that the project ID and secret name are correct"
+	}
+	if hint == "" {
+		return err
+	}
+	return fmt.Errorf("%w (%s)", err, hint)
 }
 
 // baseName returns the last path segment of a GCP resource name, e.g.

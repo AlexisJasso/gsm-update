@@ -146,7 +146,7 @@ func NewModel(service secretmanager.Service) Model {
 	projectInput := textinput.New()
 	projectInput.Prompt = ""
 	projectInput.Placeholder = "my-gcp-project"
-	projectInput.CharLimit = 63 // GCP project IDs are at most 30 characters.
+	projectInput.CharLimit = 30 // GCP project IDs are at most 30 characters.
 	projectInput.SetWidth(40)
 	projectInput.Focus()
 
@@ -445,6 +445,9 @@ func (m *Model) resetEditing() tea.Cmd {
 // which provides rune-aware editing, cursor movement, and paste.
 func (m Model) updateProjectInput(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Code == tea.KeyEnter {
+		// Normalize padded input so it is validated and sent to the API
+		// without surrounding whitespace.
+		m.projectInput.SetValue(strings.TrimSpace(m.projectInput.Value()))
 		if m.projectInput.Value() == "" {
 			return m, nil
 		}
