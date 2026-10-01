@@ -12,7 +12,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/raumornie/gsm-update/secretmanager"
 )
 
@@ -75,26 +74,6 @@ const (
 	StateSecretSelection
 	StateContentEdit
 	StateConfirmSave
-)
-
-var (
-	// Styles for our UI elements
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("205")).
-			Align(lipgloss.Center)
-
-	inputStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("69")).
-			Padding(1)
-
-	editorStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("69")).
-			Padding(1)
 )
 
 // Result messages produced by the model's commands. Keeping them as distinct
@@ -317,17 +296,17 @@ func (m Model) View() tea.View {
 
 	switch m.state {
 	case StateProjectInput:
-		s.WriteString(m.views.ProjectInputView(titleStyle, inputStyle, m.projectInput.View()))
+		s.WriteString(m.views.ProjectInputView(m.projectInput.View()))
 	case StateSecretSelection:
-		s.WriteString(m.views.SecretSelectionView(titleStyle, m.list.View()))
+		s.WriteString(m.views.SecretSelectionView(m.list.View()))
 	case StateContentEdit:
 		if m.binary {
-			s.WriteString(m.views.ContentView(titleStyle, editorStyle, m.selectedSecret, m.binaryView()))
+			s.WriteString(m.views.ContentView(m.selectedSecret, m.binaryView()))
 		} else {
-			s.WriteString(m.views.ContentView(titleStyle, editorStyle, m.selectedSecret, m.editor.View()))
+			s.WriteString(m.views.ContentView(m.selectedSecret, m.editor.View()))
 		}
 	case StateConfirmSave:
-		s.WriteString(m.views.ConfirmSaveView(titleStyle, m.selectedSecret))
+		s.WriteString(m.views.ConfirmSaveView(m.selectedSecret))
 	}
 
 	if m.loading {

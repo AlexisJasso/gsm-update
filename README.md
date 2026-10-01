@@ -92,4 +92,4 @@ gsm-update/
 
 ## License
 
-[License information if applicable]
+[MIT](LICENSE)

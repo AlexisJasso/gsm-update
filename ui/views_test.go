@@ -3,14 +3,10 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"charm.land/lipgloss/v2"
 )
 
 func TestProjectInputView(t *testing.T) {
 	v := NewViews()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Align(lipgloss.Center)
-	inputStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("69")).Padding(1)
 
 	tests := []struct {
 		name         string
@@ -36,7 +32,7 @@ func TestProjectInputView(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := v.ProjectInputView(titleStyle, inputStyle, tt.projectID)
+			got := v.ProjectInputView(tt.projectID)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("ProjectInputView() = %q, does not contain %q", got, want)
@@ -48,7 +44,6 @@ func TestProjectInputView(t *testing.T) {
 
 func TestSecretSelectionView(t *testing.T) {
 	v := NewViews()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Align(lipgloss.Center)
 
 	tests := []struct {
 		name         string
@@ -69,7 +64,7 @@ func TestSecretSelectionView(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := v.SecretSelectionView(titleStyle, tt.listContent)
+			got := v.SecretSelectionView(tt.listContent)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("SecretSelectionView() = %q, does not contain %q", got, want)
@@ -81,8 +76,6 @@ func TestSecretSelectionView(t *testing.T) {
 
 func TestContentView(t *testing.T) {
 	v := NewViews()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Align(lipgloss.Center)
-	editorStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("69")).Padding(1)
 
 	tests := []struct {
 		name         string
@@ -118,7 +111,7 @@ func TestContentView(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := v.ContentView(titleStyle, editorStyle, tt.secretName, tt.content)
+			got := v.ContentView(tt.secretName, tt.content)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("ContentView() = %q, does not contain %q", got, want)
@@ -130,9 +123,8 @@ func TestContentView(t *testing.T) {
 
 func TestConfirmSaveView(t *testing.T) {
 	v := NewViews()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Align(lipgloss.Center)
 
-	got := v.ConfirmSaveView(titleStyle, "my-secret")
+	got := v.ConfirmSaveView("my-secret")
 	for _, want := range []string{
 		"Confirm Save",
 		"my-secret",
@@ -147,10 +139,8 @@ func TestConfirmSaveView(t *testing.T) {
 
 func TestContentViewFooter(t *testing.T) {
 	v := NewViews()
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Align(lipgloss.Center)
-	editorStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("69")).Padding(1)
 
-	got := v.ContentView(titleStyle, editorStyle, "my-secret", "some content")
+	got := v.ContentView("my-secret", "some content")
 	if !strings.Contains(got, "Arrows to move the cursor, Home/End to jump, Ctrl+S to save, Esc to cancel") {
 		t.Errorf("ContentView() missing footer hint: %q", got)
 	}
