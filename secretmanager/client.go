@@ -18,16 +18,18 @@ const operationTimeout = 30 * time.Second
 // Service is the contract that the rest of the application uses to interact
 // with Google Secret Manager. The UI depends on this interface (rather than
 // on *Client) so that tests can substitute a fake implementation.
+// Implementations are expected to bound each call with their own timeout,
+// so callers may pass context.Background().
 type Service interface {
 	// ListSecrets returns the short names of all secrets in the project.
-	ListSecrets(projectID string) ([]string, error)
+	ListSecrets(ctx context.Context, projectID string) ([]string, error)
 	// GetSecretVersion returns the payload and the resource name of the most
 	// recently created enabled version of a secret. It returns a "no enabled
 	// version" error if the secret has no enabled version.
-	GetSecretVersion(projectID, secretName string) (payload, version string, err error)
+	GetSecretVersion(ctx context.Context, projectID, secretName string) (payload, version string, err error)
 	// CreateSecretVersion adds a new version of a secret and disables all
 	// other enabled versions of that secret.
-	CreateSecretVersion(projectID, secretName, payload string) error
+	CreateSecretVersion(ctx context.Context, projectID, secretName, payload string) error
 	// Close releases any resources held by the service.
 	Close() error
 }
@@ -52,7 +54,6 @@ type apiClient interface {
 // Client implements Service on top of the GCP Secret Manager API.
 type Client struct {
 	api apiClient
-	ctx context.Context
 }
 
 var _ Service = (*Client)(nil)
@@ -64,16 +65,13 @@ func NewClient(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
-	return &Client{
-		api: &gcpAPI{client: gcp},
-		ctx: ctx,
-	}, nil
+	return &Client{api: &gcpAPI{client: gcp}}, nil
 }
 
 // newClientWithAPI creates a Client backed by the provided apiClient. It is
 // intended for tests.
-func newClientWithAPI(api apiClient, ctx context.Context) *Client {
-	return &Client{api: api, ctx: ctx}
+func newClientWithAPI(api apiClient) *Client {
+	return &Client{api: api}
 }
 
 // Close closes the underlying connection, if any.
@@ -85,8 +83,8 @@ func (c *Client) Close() error {
 }
 
 // ListSecrets lists the short names of all secrets in a project.
-func (c *Client) ListSecrets(projectID string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, operationTimeout)
+func (c *Client) ListSecrets(ctx context.Context, projectID string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
 	names, err := c.api.listSecrets(ctx, "projects/"+projectID)
@@ -102,8 +100,8 @@ func (c *Client) ListSecrets(projectID string) ([]string, error) {
 // version it returns a "no enabled version" error. The version's resource
 // name is returned so the caller can report which version a payload belongs
 // to (e.g. when the payload is binary and cannot be edited).
-func (c *Client) GetSecretVersion(projectID, secretName string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(c.ctx, operationTimeout)
+func (c *Client) GetSecretVersion(ctx context.Context, projectID, secretName string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/secrets/%s", projectID, secretName)
@@ -156,8 +154,8 @@ func versionNumber(name string) (int, bool) {
 // are left as-is. If disabling fails partway through, the new version is
 // already in place and the error is returned so the caller can inspect the
 // secret's state.
-func (c *Client) CreateSecretVersion(projectID, secretName, payload string) error {
-	ctx, cancel := context.WithTimeout(c.ctx, operationTimeout)
+func (c *Client) CreateSecretVersion(ctx context.Context, projectID, secretName, payload string) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
 	name := fmt.Sprintf("projects/%s/secrets/%s", projectID, secretName)

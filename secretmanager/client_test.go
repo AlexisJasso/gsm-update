@@ -10,16 +10,18 @@ import (
 )
 
 func TestNewClient(t *testing.T) {
-	// NewClient requires a valid GCP context and credentials.
-	// We test that it returns an error when no credentials are available,
-	// rather than panicking or returning a non-nil client.
-	ctx := &testContext{}
-	client, err := NewClient(ctx)
+	// NewClient requires valid GCP credentials. Pointing ADC at a
+	// nonexistent file makes credential detection fail deterministically,
+	// so the test passes whether or not the machine running it is
+	// authenticated (ADC checks GOOGLE_APPLICATION_CREDENTIALS first and
+	// errors out instead of falling through to other credential sources).
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/creds.json")
+	client, err := NewClient(context.Background())
 	if client != nil {
-		t.Error("NewClient() with invalid context should return nil client")
+		t.Error("NewClient() without credentials should return nil client")
 	}
 	if err == nil {
-		t.Error("NewClient() with invalid context should return an error")
+		t.Error("NewClient() without credentials should return an error")
 	}
 }
 
@@ -90,8 +92,8 @@ func (f *fakeAPI) disableSecretVersion(ctx context.Context, name string) error {
 func TestListSecrets(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		api := &fakeAPI{listedNames: []string{"a", "b"}}
-		c := newClientWithAPI(api, context.Background())
-		got, err := c.ListSecrets("p")
+		c := newClientWithAPI(api)
+		got, err := c.ListSecrets(context.Background(), "p")
 		if err != nil {
 			t.Fatalf("ListSecrets() unexpected error: %v", err)
 		}
@@ -102,8 +104,8 @@ func TestListSecrets(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		api := &fakeAPI{listErr: errors.New("boom")}
-		c := newClientWithAPI(api, context.Background())
-		if _, err := c.ListSecrets("p"); err == nil {
+		c := newClientWithAPI(api)
+		if _, err := c.ListSecrets(context.Background(), "p"); err == nil {
 			t.Error("ListSecrets() expected error")
 		}
 	})
@@ -115,8 +117,8 @@ func TestGetSecretVersion(t *testing.T) {
 			payload:  []byte("hello"),
 			versions: []secretVersion{{name: "projects/p/secrets/s/versions/1", enabled: true}},
 		}
-		c := newClientWithAPI(api, context.Background())
-		got, version, err := c.GetSecretVersion("p", "s")
+		c := newClientWithAPI(api)
+		got, version, err := c.GetSecretVersion(context.Background(), "p", "s")
 		if err != nil {
 			t.Fatalf("GetSecretVersion() unexpected error: %v", err)
 		}
@@ -140,8 +142,8 @@ func TestGetSecretVersion(t *testing.T) {
 				{name: "projects/p/secrets/s/versions/3", enabled: false},
 			},
 		}
-		c := newClientWithAPI(api, context.Background())
-		_, version, err := c.GetSecretVersion("p", "s")
+		c := newClientWithAPI(api)
+		_, version, err := c.GetSecretVersion(context.Background(), "p", "s")
 		if err != nil {
 			t.Fatalf("GetSecretVersion() unexpected error: %v", err)
 		}
@@ -157,8 +159,8 @@ func TestGetSecretVersion(t *testing.T) {
 		api := &fakeAPI{
 			versions: []secretVersion{{name: "projects/p/secrets/s/versions/1", enabled: false}},
 		}
-		c := newClientWithAPI(api, context.Background())
-		_, _, err := c.GetSecretVersion("p", "s")
+		c := newClientWithAPI(api)
+		_, _, err := c.GetSecretVersion(context.Background(), "p", "s")
 		if err == nil {
 			t.Fatal("GetSecretVersion() expected error")
 		}
@@ -172,8 +174,8 @@ func TestGetSecretVersion(t *testing.T) {
 
 	t.Run("list versions error", func(t *testing.T) {
 		api := &fakeAPI{listVersionsErr: errors.New("boom")}
-		c := newClientWithAPI(api, context.Background())
-		if _, _, err := c.GetSecretVersion("p", "s"); err == nil {
+		c := newClientWithAPI(api)
+		if _, _, err := c.GetSecretVersion(context.Background(), "p", "s"); err == nil {
 			t.Error("GetSecretVersion() expected error")
 		}
 	})
@@ -183,8 +185,8 @@ func TestGetSecretVersion(t *testing.T) {
 			accessErr: errors.New("boom"),
 			versions:  []secretVersion{{name: "projects/p/secrets/s/versions/1", enabled: true}},
 		}
-		c := newClientWithAPI(api, context.Background())
-		if _, _, err := c.GetSecretVersion("p", "s"); err == nil {
+		c := newClientWithAPI(api)
+		if _, _, err := c.GetSecretVersion(context.Background(), "p", "s"); err == nil {
 			t.Error("GetSecretVersion() expected error")
 		}
 	})
@@ -200,9 +202,9 @@ func TestCreateSecretVersion(t *testing.T) {
 				{name: "projects/p/secrets/s/versions/3", enabled: true},
 			},
 		}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "new data"); err != nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "new data"); err != nil {
 			t.Fatalf("CreateSecretVersion() unexpected error: %v", err)
 		}
 		if string(api.addedPayload) != "new data" {
@@ -219,9 +221,9 @@ func TestCreateSecretVersion(t *testing.T) {
 			newVersionName: "projects/p/secrets/s/versions/1",
 			versions:       []secretVersion{{name: "projects/p/secrets/s/versions/1", enabled: true}},
 		}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "x"); err != nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err != nil {
 			t.Fatalf("CreateSecretVersion() unexpected error: %v", err)
 		}
 		if len(api.disabled) != 0 {
@@ -231,9 +233,9 @@ func TestCreateSecretVersion(t *testing.T) {
 
 	t.Run("add failure disables nothing", func(t *testing.T) {
 		api := &fakeAPI{addErr: errors.New("boom")}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "x"); err == nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err == nil {
 			t.Fatal("CreateSecretVersion() expected error")
 		}
 		if len(api.disabled) != 0 {
@@ -243,9 +245,9 @@ func TestCreateSecretVersion(t *testing.T) {
 
 	t.Run("list failure disables nothing", func(t *testing.T) {
 		api := &fakeAPI{newVersionName: "v3", listVersionsErr: errors.New("boom")}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "x"); err == nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err == nil {
 			t.Fatal("CreateSecretVersion() expected error")
 		}
 		if len(api.disabled) != 0 {
@@ -262,9 +264,9 @@ func TestCreateSecretVersion(t *testing.T) {
 				{name: "v3", enabled: true},
 			},
 		}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "x"); err != nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err != nil {
 			t.Fatalf("CreateSecretVersion() unexpected error: %v", err)
 		}
 		if !reflect.DeepEqual(api.disabled, []string{"v2"}) {
@@ -282,9 +284,9 @@ func TestCreateSecretVersion(t *testing.T) {
 			},
 			disableErrs: map[string]error{"v1": errors.New("boom")},
 		}
-		c := newClientWithAPI(api, context.Background())
+		c := newClientWithAPI(api)
 
-		if err := c.CreateSecretVersion("p", "s", "x"); err == nil {
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err == nil {
 			t.Fatal("CreateSecretVersion() expected error")
 		}
 		// v1 failed; v2 must not have been attempted.
@@ -316,8 +318,8 @@ func assertTimeout(t *testing.T, ctx context.Context) {
 func TestOperationsUseTimeout(t *testing.T) {
 	t.Run("ListSecrets", func(t *testing.T) {
 		api := &fakeAPI{listedNames: []string{"a"}}
-		c := newClientWithAPI(api, context.Background())
-		if _, err := c.ListSecrets("p"); err != nil {
+		c := newClientWithAPI(api)
+		if _, err := c.ListSecrets(context.Background(), "p"); err != nil {
 			t.Fatalf("ListSecrets() unexpected error: %v", err)
 		}
 		if len(api.ctxs) != 1 {
@@ -331,8 +333,8 @@ func TestOperationsUseTimeout(t *testing.T) {
 			payload:  []byte("x"),
 			versions: []secretVersion{{name: "projects/p/secrets/s/versions/1", enabled: true}},
 		}
-		c := newClientWithAPI(api, context.Background())
-		if _, _, err := c.GetSecretVersion("p", "s"); err != nil {
+		c := newClientWithAPI(api)
+		if _, _, err := c.GetSecretVersion(context.Background(), "p", "s"); err != nil {
 			t.Fatalf("GetSecretVersion() unexpected error: %v", err)
 		}
 		// list + access.
@@ -352,8 +354,8 @@ func TestOperationsUseTimeout(t *testing.T) {
 				{name: "v3", enabled: true},
 			},
 		}
-		c := newClientWithAPI(api, context.Background())
-		if err := c.CreateSecretVersion("p", "s", "x"); err != nil {
+		c := newClientWithAPI(api)
+		if err := c.CreateSecretVersion(context.Background(), "p", "s", "x"); err != nil {
 			t.Fatalf("CreateSecretVersion() unexpected error: %v", err)
 		}
 		// add + list + one disable.
@@ -365,13 +367,3 @@ func TestOperationsUseTimeout(t *testing.T) {
 		}
 	})
 }
-
-// testContext is a minimal context implementation for testing
-type testContext struct{}
-
-func (testContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (testContext) Done() <-chan struct{}       { return nil }
-func (testContext) Value(key any) any           { return nil }
-func (testContext) Err() error                  { return nil }
-
-var _ context.Context = (*testContext)(nil)

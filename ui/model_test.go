@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,21 +26,21 @@ type fakeService struct {
 	saveErr      error
 }
 
-func (f *fakeService) ListSecrets(projectID string) ([]string, error) {
+func (f *fakeService) ListSecrets(_ context.Context, projectID string) ([]string, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	return f.secrets, nil
 }
 
-func (f *fakeService) GetSecretVersion(projectID, secretName string) (string, string, error) {
+func (f *fakeService) GetSecretVersion(_ context.Context, projectID, secretName string) (string, string, error) {
 	if f.getErr != nil {
 		return "", "", f.getErr
 	}
 	return f.content, f.version, nil
 }
 
-func (f *fakeService) CreateSecretVersion(projectID, secretName, payload string) error {
+func (f *fakeService) CreateSecretVersion(_ context.Context, projectID, secretName, payload string) error {
 	f.saveCalls++
 	if f.saveErr != nil {
 		return f.saveErr

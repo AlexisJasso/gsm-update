@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -354,7 +355,7 @@ func (m Model) View() tea.View {
 func (m Model) listSecretsCmd() tea.Cmd {
 	req := m.req
 	return func() tea.Msg {
-		secrets, err := m.service.ListSecrets(m.projectInput.Value())
+		secrets, err := m.service.ListSecrets(context.Background(), m.projectInput.Value())
 		return listSecretsResult{req: req, secrets: secrets, err: err}
 	}
 }
@@ -365,7 +366,7 @@ func (m Model) listSecretsCmd() tea.Cmd {
 func (m Model) loadSecretCmd() tea.Cmd {
 	req := m.req
 	return func() tea.Msg {
-		content, version, err := m.service.GetSecretVersion(m.projectInput.Value(), m.selectedSecret)
+		content, version, err := m.service.GetSecretVersion(context.Background(), m.projectInput.Value(), m.selectedSecret)
 		return loadSecretResult{req: req, content: content, version: version, err: err}
 	}
 }
@@ -415,7 +416,7 @@ func payloadEditBlocker(payload string) (reason string, blocked bool) {
 func (m Model) saveSecretCmd() tea.Cmd {
 	req := m.req
 	return func() tea.Msg {
-		err := m.service.CreateSecretVersion(m.projectInput.Value(), m.selectedSecret, m.editor.Value())
+		err := m.service.CreateSecretVersion(context.Background(), m.projectInput.Value(), m.selectedSecret, m.editor.Value())
 		return saveSecretResult{req: req, err: err}
 	}
 }
