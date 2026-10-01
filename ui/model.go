@@ -237,10 +237,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Listing failed (e.g. bad project ID): go back to the project
 			// input so the user can correct it.
 			m.err = msg.err
+			m.status = ""
 			m.state = StateProjectInput
 			return m, nil
 		}
 		m.err = nil
+		m.status = ""
 		m.list.ResetFilter()
 		m.list.ResetSelected()
 		m.list.SetItems(secretItems(msg.secrets))
@@ -258,10 +260,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Loading failed: go back to the secret list so the user can
 			// pick another secret.
 			m.err = msg.err
+			m.status = ""
 			m.state = StateSecretSelection
 			return m, nil
 		}
 		m.err = nil
+		m.status = ""
 		// Gate the payload before it enters the editor: if it is not valid
 		// UTF-8, or the editor's sanitizer would alter it, editing it as text
 		// would corrupt it. Mark it binary and show a read-only hex dump
@@ -293,6 +297,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.err = msg.err
+			m.status = ""
 			return m, nil
 		}
 		m.err = nil
@@ -304,6 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case error:
 		m.err = msg
+		m.status = ""
 		return m, nil
 	}
 
@@ -488,6 +494,7 @@ func (m Model) updateSecretSelection(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		m.status = ""
 		m.selectedSecret = string(item.(secretItem))
 		m.loading = true
 		m.req++
@@ -499,11 +506,15 @@ func (m Model) updateSecretSelection(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Invalidate any in-flight list command so its result is dropped.
 		m.req++
 		m.state = StateProjectInput
+		m.err = nil
+		m.status = ""
 		return m, nil
 	}
 
 	newList, cmd := m.list.Update(key)
 	m.list = newList
+	m.err = nil
+	m.status = ""
 	return m, cmd
 }
 
@@ -573,12 +584,14 @@ func (m Model) updateConfirmSave(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Text == "y" || key.Text == "Y" || key.Code == 'y' || key.Code == 'Y':
 		m.saving = true
+		m.status = ""
 		m.err = nil
 		m.req++
 		return m, m.saveSecretCmd()
 	case key.Code == tea.KeyEscape || key.Text == "n" || key.Text == "N" || key.Code == 'n' || key.Code == 'N':
 		m.state = StateContentEdit
 		m.status = "Save cancelled."
+		m.err = nil
 		return m, nil
 	}
 

@@ -900,7 +900,7 @@ func TestSaveConfirmCapsYConfirms(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("confirming with 'Y' should return a save cmd")
 	}
-	m = runCmd(t, m, cmd)
+	_ = runCmd(t, m, cmd)
 	if svc.saveCalls != 1 {
 		t.Errorf("CreateSecretVersion calls = %d, want 1", svc.saveCalls)
 	}
